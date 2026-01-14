@@ -28,17 +28,13 @@ export default function LoginPage() {
     const result = await signIn('credentials', {
       username,
       password,
-      redirect: false,
+      callbackUrl: '/',
     });
 
-    setLoading(false);
-
     if (result?.error) {
+      setLoading(false);
       setError('Invalid credentials or account expired');
       toast.error('Invalid credentials or account expired');
-    } else {
-      toast.success('Login successful!');
-      window.location.href = '/';
     }
   };
 
