@@ -15,16 +15,16 @@ export default function Home() {
 
   return (
     <SlitterProvider>
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen flex flex-col bg-background">
         <Header activeTab={activeTab} setActiveTab={setActiveTab} />
-        <main className="container mx-auto px-4 py-6">
+        <main className="flex-1 container mx-auto px-4 py-6">
           {activeTab === "rm-coil" && <RMCoilTab />}
           {activeTab === "sales-order" && <SalesOrderTab />}
           {activeTab === "line-spec" && <LineSpecTab />}
           {activeTab === "optimizer" && <OptimizerTab />}
           {activeTab === "forecast" && <ForecastTab />}
         </main>
-        <div className="container mx-auto px-4 mb-4">
+        <div className="container mx-auto px-4 pb-4">
           <Footer />
         </div>
       </div>

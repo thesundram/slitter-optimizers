@@ -1,8 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useSession } from "next-auth/react"
+import Link from "next/link"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Scissors, Package, FileText, Settings, Cpu, TrendingUp } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Scissors, Package, FileText, Settings, Cpu, TrendingUp, LogOut, Users } from "lucide-react"
+import { signOut } from "next-auth/react"
 
 interface HeaderProps {
   activeTab: string
@@ -11,6 +15,7 @@ interface HeaderProps {
 
 export function Header({ activeTab, setActiveTab }: HeaderProps) {
   const [date, setDate] = useState("")
+  const { data: session } = useSession()
 
   useEffect(() => {
     setDate(new Date().toLocaleDateString())
@@ -33,6 +38,22 @@ export function Header({ activeTab, setActiveTab }: HeaderProps) {
             <span>Shift: Day</span>
             <span className="h-4 w-px bg-border" />
             <span>Date: {date}</span>
+            {session?.user?.role === 'admin' && (
+              <>
+                <span className="h-4 w-px bg-border" />
+                <Link href="/admin">
+                  <Button variant="ghost" size="sm">
+                    <Users className="h-4 w-4 mr-2" />
+                    Users
+                  </Button>
+                </Link>
+              </>
+            )}
+            <span className="h-4 w-px bg-border" />
+            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: '/login' })}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
           </div>
         </div>
 
