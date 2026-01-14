@@ -38,8 +38,9 @@ export default function LoginPage() {
       toast.error('Invalid credentials or account expired');
     } else {
       toast.success('Login successful!');
-      router.push('/');
-      router.refresh();
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 500);
     }
   };
 
