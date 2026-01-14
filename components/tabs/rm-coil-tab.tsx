@@ -20,7 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Upload, Plus, Trash2, Package } from "lucide-react"
+import { Upload, Plus, Trash2, Package, Info } from "lucide-react"
 import { useSlitter, type RMCoil } from "@/lib/slitter-context"
 
 export function RMCoilTab() {
@@ -172,7 +172,7 @@ export function RMCoilTab() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="thickness">Thickness (MM)</Label>
+                    <Label htmlFor="thickness">Thickness (mm)</Label>
                     <Input
                       id="thickness"
                       type="number"
@@ -184,7 +184,7 @@ export function RMCoilTab() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="width">Width (MM)</Label>
+                    <Label htmlFor="width">Width (mm)</Label>
                     <Input
                       id="width"
                       type="number"
@@ -240,6 +240,27 @@ export function RMCoilTab() {
         </div>
       </div>
 
+      <Card className="border-primary/20 bg-primary/5">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Info className="h-4 w-4 text-primary" />
+            CSV File Format
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-2">
+            Upload a CSV file with the following columns (headers are case-insensitive):
+          </p>
+          <div className="bg-muted rounded-md p-3 font-mono text-xs overflow-x-auto">
+            <div className="text-primary font-semibold">
+              Coil ID, Type, Grade, Thickness(mm), Width(mm), Weight(MT), Inner Diameter, Outer Diameter
+            </div>
+            <div className="text-muted-foreground mt-2">HR-001, HR, SS304, 2.5, 1250, 12.5, 508, 1800</div>
+            <div className="text-muted-foreground">CR-002, CR, SS316, 1.2, 1000, 8.3, 508, 1600</div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -289,8 +310,8 @@ export function RMCoilTab() {
                     <TableHead>Coil ID</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>Grade</TableHead>
-                    <TableHead>Thickness (MM)</TableHead>
-                    <TableHead>Width (MM)</TableHead>
+                    <TableHead>Thickness (mm)</TableHead>
+                    <TableHead>Width (mm)</TableHead>
                     <TableHead>Weight (MT)</TableHead>
                     <TableHead>Line Compatibility</TableHead>
                     <TableHead className="w-[50px]"></TableHead>

@@ -20,6 +20,7 @@ export interface SalesOrder {
   orderId: string
   type: "HR" | "CR"
   requiredWidth: number
+  noOfSlit: number
   weight: number
   grade: string
   thickness: number
@@ -59,6 +60,8 @@ export interface OptimizationResult {
   totalScrap: number
   ordersCovered: number
   totalOrders: number
+  partiallyFulfilledOrders?: number
+  orderSlitsAssigned?: Record<string, number>
 }
 
 interface SlitterContextType {

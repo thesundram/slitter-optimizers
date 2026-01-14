@@ -28,8 +28,27 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 }
 
 export function YieldScrapChart({ patterns, coils }: YieldScrapChartProps) {
-  const data = patterns.map((p) => {
-    const coil = coils.find((c) => c.coilId === p.coilId)
+  const safePatterns = patterns || []
+  const safeCoils = coils || []
+
+  if (safePatterns.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Yield vs Scrap Analysis</CardTitle>
+          <CardDescription>Use weight and scrap weight (MT) with percentage by coil</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+            No optimization data available. Run the optimizer first.
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const data = safePatterns.map((p) => {
+    const coil = safeCoils.find((c) => c.coilId === p.coilId)
     const totalWeight = coil?.weight || 0
     const useWeight = (p.yieldPercent / 100) * totalWeight
     const scrapWeight = ((100 - p.yieldPercent) / 100) * totalWeight

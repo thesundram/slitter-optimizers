@@ -1,4 +1,5 @@
 // This implements a cutting-stock/bin-packing solver similar to OR-Tools CP-SAT
+// Key optimization factors: Yield, Order coverage, Scrap minimization, and No of Slit requirements
 
 import type { RMCoil, SalesOrder, LineSpec, SlittingPattern, OptimizationResult } from "./slitter-context"
 
@@ -214,13 +215,14 @@ class ORToolsModel {
 interface CuttingPattern {
   widths: number[]
   orderIndices: number[]
+  slitCounts: Map<number, number> // orderIndex -> count of slits assigned
   waste: number
   usedWidth: number
 }
 
 function generateAllPatternsForCoil(
   coilWidth: number,
-  orders: { width: number; orderId: string }[],
+  orders: { width: number; orderId: string; noOfSlit: number; remainingSlits: number }[],
   lineSpec: LineSpec,
 ): CuttingPattern[] {
   const patterns: CuttingPattern[] = []
@@ -229,10 +231,12 @@ function generateAllPatternsForCoil(
   const maxKnives = lineSpec.maxKnives
 
   // Generate patterns using recursive enumeration with pruning
+  // Now considers noOfSlit requirements
   const generatePatterns = (
     remaining: number,
     currentWidths: number[],
     currentOrderIndices: number[],
+    slitCounts: Map<number, number>,
     startIndex: number,
   ) => {
     // Calculate current waste
@@ -244,6 +248,7 @@ function generateAllPatternsForCoil(
       patterns.push({
         widths: [...currentWidths],
         orderIndices: [...currentOrderIndices],
+        slitCounts: new Map(slitCounts),
         waste: waste + edgeTrim,
         usedWidth,
       })
@@ -253,24 +258,64 @@ function generateAllPatternsForCoil(
     if (currentWidths.length >= maxKnives) return
 
     for (let i = startIndex; i < orders.length; i++) {
-      const orderWidth = orders[i].width
-      if (orderWidth <= remaining && orderWidth >= lineSpec.minSlitWidth && orderWidth <= lineSpec.maxSlitWidth) {
+      const order = orders[i]
+      const orderWidth = order.width
+      const currentSlitCount = slitCounts.get(i) || 0
+
+      const canAddMoreSlits = currentSlitCount < order.remainingSlits
+
+      if (
+        orderWidth <= remaining &&
+        orderWidth >= lineSpec.minSlitWidth &&
+        orderWidth <= lineSpec.maxSlitWidth &&
+        canAddMoreSlits
+      ) {
         currentWidths.push(orderWidth)
         currentOrderIndices.push(i)
-        generatePatterns(remaining - orderWidth, currentWidths, currentOrderIndices, i)
+        slitCounts.set(i, currentSlitCount + 1)
+
+        generatePatterns(remaining - orderWidth, currentWidths, currentOrderIndices, slitCounts, i)
+
         currentWidths.pop()
         currentOrderIndices.pop()
+        slitCounts.set(i, currentSlitCount)
       }
     }
   }
 
-  generatePatterns(usableWidth, [], [], 0)
+  generatePatterns(usableWidth, [], [], new Map(), 0)
 
-  // Sort by efficiency (less waste = better)
-  patterns.sort((a, b) => a.waste - b.waste)
+  patterns.sort((a, b) => {
+    // First priority: patterns that complete more slit requirements
+    const aSlitScore = calculateSlitFulfillmentScore(a, orders)
+    const bSlitScore = calculateSlitFulfillmentScore(b, orders)
+    if (bSlitScore !== aSlitScore) return bSlitScore - aSlitScore
+
+    // Second priority: less waste
+    return a.waste - b.waste
+  })
 
   // Return top patterns to limit complexity
   return patterns.slice(0, 50)
+}
+
+function calculateSlitFulfillmentScore(
+  pattern: CuttingPattern,
+  orders: { width: number; orderId: string; noOfSlit: number; remainingSlits: number }[],
+): number {
+  let score = 0
+  for (const [orderIdx, slitCount] of pattern.slitCounts) {
+    const order = orders[orderIdx]
+    // Higher score for getting closer to fulfilling the noOfSlit requirement
+    const fulfillmentRatio = slitCount / order.noOfSlit
+    score += Math.min(fulfillmentRatio, 1) * 100 // Cap at 100% fulfillment
+
+    // Bonus for exact matches
+    if (slitCount === order.remainingSlits) {
+      score += 20
+    }
+  }
+  return score
 }
 
 // Main OR-Tools style optimization using Set Covering formulation
@@ -288,6 +333,14 @@ export function runOptimization(
       ordersCovered: 0,
       totalOrders: orders.length,
     }
+  }
+
+  const orderSlitTracker = new Map<string, { total: number; remaining: number }>()
+  for (const order of orders) {
+    orderSlitTracker.set(order.orderId, {
+      total: order.noOfSlit || 1,
+      remaining: order.noOfSlit || 1,
+    })
   }
 
   // Step 1: Filter compatible coil-order pairs
@@ -321,7 +374,12 @@ export function runOptimization(
   }[] = []
 
   for (const { coil, orders: compatibleOrders, lineSpec } of compatiblePairs) {
-    const orderWidths = compatibleOrders.map((o) => ({ width: o.requiredWidth, orderId: o.orderId }))
+    const orderWidths = compatibleOrders.map((o) => ({
+      width: o.requiredWidth,
+      orderId: o.orderId,
+      noOfSlit: o.noOfSlit || 1,
+      remainingSlits: orderSlitTracker.get(o.orderId)?.remaining || 1,
+    }))
     const patterns = generateAllPatternsForCoil(coil.width, orderWidths, lineSpec)
 
     for (const pattern of patterns) {
@@ -376,7 +434,6 @@ export function runOptimization(
     else if (lineName === "Line-2") line2Patterns.push(i)
   }
 
-  // Objective function: Maximize weighted score
   for (let i = 0; i < allCandidatePatterns.length; i++) {
     const { coil, pattern, compatibleOrders } = allCandidatePatterns[i]
     const yieldPercent = (pattern.usedWidth / coil.width) * 100
@@ -384,9 +441,30 @@ export function runOptimization(
     // Calculate score based on weights
     const yieldScore = yieldPercent * (weights.w1 / 100)
 
-    // Order coverage score
-    const uniqueOrders = new Set(pattern.orderIndices)
-    const orderScore = (uniqueOrders.size / Math.max(compatibleOrders.length, 1)) * 100 * (weights.w2 / 100)
+    let slitFulfillmentScore = 0
+    const slitCountByOrder = new Map<string, number>()
+
+    for (const orderIdx of pattern.orderIndices) {
+      const order = compatibleOrders[orderIdx]
+      const currentCount = slitCountByOrder.get(order.orderId) || 0
+      slitCountByOrder.set(order.orderId, currentCount + 1)
+    }
+
+    for (const [orderId, slitCount] of slitCountByOrder) {
+      const order = compatibleOrders.find((o) => o.orderId === orderId)
+      if (order) {
+        const requiredSlits = order.noOfSlit || 1
+        const fulfillmentRatio = Math.min(slitCount / requiredSlits, 1)
+        slitFulfillmentScore += fulfillmentRatio * 50 // Significant weight for slit fulfillment
+
+        // Bonus for exact match
+        if (slitCount === requiredSlits) {
+          slitFulfillmentScore += 25
+        }
+      }
+    }
+
+    const orderScore = slitFulfillmentScore * (weights.w2 / 100)
 
     // Scrap penalty
     const scrapPenalty = (pattern.waste / 100) * (weights.w3 / 100)
@@ -405,27 +483,35 @@ export function runOptimization(
   // Step 5: Extract solution and build result patterns
   const selectedPatterns: SlittingPattern[] = []
   const usedCoils = new Set<string>()
+  const orderSlitsAssigned = new Map<string, number>()
 
   for (let i = 0; i < allCandidatePatterns.length; i++) {
     if (model.getValue(patternVars[i]) === 1 && !usedCoils.has(allCandidatePatterns[i].coil.coilId)) {
       const { coil, pattern, lineSpec, compatibleOrders } = allCandidatePatterns[i]
 
-      // Build slit widths with order IDs
+      // Build slit widths with order IDs and quantities based on noOfSlit
       const slitWidths: { width: number; orderId?: string; quantity: number }[] = []
-      const widthCounts = new Map<number, { count: number; orderIds: string[] }>()
+      const widthCounts = new Map<number, { count: number; orderIds: string[]; orders: SalesOrder[] }>()
 
       for (const idx of pattern.orderIndices) {
         const order = compatibleOrders[idx]
         const existing = widthCounts.get(order.requiredWidth)
         if (existing) {
           existing.count++
-          existing.orderIds.push(order.orderId)
+          if (!existing.orderIds.includes(order.orderId)) {
+            existing.orderIds.push(order.orderId)
+            existing.orders.push(order)
+          }
         } else {
-          widthCounts.set(order.requiredWidth, { count: 1, orderIds: [order.orderId] })
+          widthCounts.set(order.requiredWidth, { count: 1, orderIds: [order.orderId], orders: [order] })
         }
+
+        // Track slits assigned to this order
+        const currentAssigned = orderSlitsAssigned.get(order.orderId) || 0
+        orderSlitsAssigned.set(order.orderId, currentAssigned + 1)
       }
 
-      for (const [width, { count, orderIds }] of widthCounts) {
+      for (const [width, { count, orderIds, orders }] of widthCounts) {
         slitWidths.push({
           width,
           orderId: orderIds[0],
@@ -466,10 +552,16 @@ export function runOptimization(
 
   const totalScrap = balancedPatterns.reduce((sum, p) => sum + p.scrapWidth, 0)
 
-  const coveredOrderIds = new Set<string>()
-  for (const pattern of balancedPatterns) {
-    for (const slit of pattern.slitWidths) {
-      if (slit.orderId) coveredOrderIds.add(slit.orderId)
+  let fullyFulfilledOrders = 0
+  let partiallyFulfilledOrders = 0
+
+  for (const order of orders) {
+    const assigned = orderSlitsAssigned.get(order.orderId) || 0
+    const required = order.noOfSlit || 1
+    if (assigned >= required) {
+      fullyFulfilledOrders++
+    } else if (assigned > 0) {
+      partiallyFulfilledOrders++
     }
   }
 
@@ -477,12 +569,14 @@ export function runOptimization(
     patterns: balancedPatterns,
     totalYield,
     totalScrap,
-    ordersCovered: coveredOrderIds.size,
+    ordersCovered: fullyFulfilledOrders,
     totalOrders: orders.length,
+    // Additional metrics for reporting
+    partiallyFulfilledOrders,
+    orderSlitsAssigned: Object.fromEntries(orderSlitsAssigned),
   }
 }
 
-// Greedy fallback optimization
 function runGreedyOptimization(
   coils: RMCoil[],
   orders: SalesOrder[],
@@ -490,16 +584,20 @@ function runGreedyOptimization(
   weights: Weights,
 ): OptimizationResult {
   const patterns: SlittingPattern[] = []
-  const usedOrders = new Set<string>()
+  const orderSlitsAssigned = new Map<string, number>()
 
   // Sort coils by width (larger first for better utilization)
   const sortedCoils = [...coils].sort((a, b) => b.width - a.width)
 
-  // Sort orders by priority then by width
+  // Sort orders by priority, then by noOfSlit (higher first), then by width
   const sortedOrders = [...orders].sort((a, b) => {
     const priorityOrder = { High: 0, Medium: 1, Low: 2 }
     if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
       return priorityOrder[a.priority] - priorityOrder[b.priority]
+    }
+    // Higher noOfSlit gets priority
+    if ((b.noOfSlit || 1) !== (a.noOfSlit || 1)) {
+      return (b.noOfSlit || 1) - (a.noOfSlit || 1)
     }
     return b.requiredWidth - a.requiredWidth
   })
@@ -520,24 +618,33 @@ function runGreedyOptimization(
     const slitWidths: { width: number; orderId?: string; quantity: number }[] = []
     let knifeCount = 0
 
-    // Greedy bin-packing
+    // Greedy bin-packing with noOfSlit consideration
     for (const order of sortedOrders) {
       if (knifeCount >= lineSpec.maxKnives - 1) break
-      if (usedOrders.has(order.orderId)) continue
       if (order.type !== coil.type || order.grade !== coil.grade) continue
       if (Math.abs(order.thickness - coil.thickness) >= 0.1) continue
       if (order.requiredWidth < lineSpec.minSlitWidth || order.requiredWidth > lineSpec.maxSlitWidth) continue
 
-      const maxFit = Math.floor(remainingWidth / order.requiredWidth)
-      if (maxFit > 0) {
+      const requiredSlits = order.noOfSlit || 1
+      const assignedSlits = orderSlitsAssigned.get(order.orderId) || 0
+      const remainingSlitsNeeded = requiredSlits - assignedSlits
+
+      if (remainingSlitsNeeded <= 0) continue // Order already fulfilled
+
+      // Calculate how many slits we can fit for this order
+      const maxFitByWidth = Math.floor(remainingWidth / order.requiredWidth)
+      const maxFitByKnives = lineSpec.maxKnives - knifeCount - 1
+      const slitsToAssign = Math.min(maxFitByWidth, maxFitByKnives, remainingSlitsNeeded)
+
+      if (slitsToAssign > 0) {
         slitWidths.push({
           width: order.requiredWidth,
           orderId: order.orderId,
-          quantity: 1,
+          quantity: slitsToAssign,
         })
-        remainingWidth -= order.requiredWidth
-        knifeCount++
-        usedOrders.add(order.orderId)
+        remainingWidth -= order.requiredWidth * slitsToAssign
+        knifeCount += slitsToAssign
+        orderSlitsAssigned.set(order.orderId, assignedSlits + slitsToAssign)
       }
     }
 
@@ -568,12 +675,27 @@ function runGreedyOptimization(
 
   const totalScrap = balancedPatterns.reduce((sum, p) => sum + p.scrapWidth, 0)
 
+  let fullyFulfilledOrders = 0
+  let partiallyFulfilledOrders = 0
+
+  for (const order of orders) {
+    const assigned = orderSlitsAssigned.get(order.orderId) || 0
+    const required = order.noOfSlit || 1
+    if (assigned >= required) {
+      fullyFulfilledOrders++
+    } else if (assigned > 0) {
+      partiallyFulfilledOrders++
+    }
+  }
+
   return {
     patterns: balancedPatterns,
     totalYield,
     totalScrap,
-    ordersCovered: usedOrders.size,
+    ordersCovered: fullyFulfilledOrders,
     totalOrders: orders.length,
+    partiallyFulfilledOrders,
+    orderSlitsAssigned: Object.fromEntries(orderSlitsAssigned),
   }
 }
 

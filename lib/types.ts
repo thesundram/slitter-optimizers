@@ -16,6 +16,7 @@ export interface SalesOrder {
   orderId: string
   type: "HR" | "CR"
   requiredWidth: number
+  noOfSlit: number
   weight: number
   grade: string
   thickness: number
