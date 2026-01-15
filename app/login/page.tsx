@@ -25,22 +25,24 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
-    const result = await signIn('credentials', {
-      username,
-      password,
-      redirect: true,
-      callbackUrl: '/',
-    });
+    try {
+      const result = await signIn('credentials', {
+        username,
+        password,
+        redirect: false,
+      });
 
-    setLoading(false);
-
-    if (result?.error) {
-      setError('Invalid credentials or account expired');
-      toast.error('Invalid credentials or account expired');
-    } else {
-      toast.success('Login successful!');
-      router.push('/');
-      router.refresh();
+      if (result?.error) {
+        setLoading(false);
+        setError('Invalid credentials or account expired');
+        toast.error('Invalid credentials or account expired');
+      } else if (result?.ok) {
+        toast.success('Login successful!');
+        window.location.href = '/';
+      }
+    } catch (error) {
+      setLoading(false);
+      toast.error('Something went wrong');
     }
   };
 

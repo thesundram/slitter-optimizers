@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import clientPromise from '@/lib/mongodb';
+import bcrypt from 'bcryptjs';
 
 export async function GET(req) {
   const session = await getServerSession(authOptions);
@@ -28,7 +29,7 @@ export async function POST(req) {
 
   const userData = {
     username: data.username,
-    password: data.password,
+    password: await bcrypt.hash(data.password, 10),
     role: data.role || 'user',
     createdAt: new Date().toISOString()
   };

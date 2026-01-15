@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import clientPromise from '@/lib/mongodb';
+import bcrypt from 'bcryptjs';
 
 export const authOptions = {
   providers: [
@@ -15,46 +16,59 @@ export const authOptions = {
           return null;
         }
 
-        const client = await clientPromise;
-        const db = client.db('slitter-optimizers');
-        
-        const user = await db.collection('users').findOne({
-          username: credentials.username,
-          password: credentials.password
-        });
-
-        if (!user) {
-          return null;
-        }
-
-        // Check expiry only for non-admin users
-        if (user.role !== 'admin' && user.expiryDate) {
-          const expiryDate = new Date(user.expiryDate);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          expiryDate.setHours(0, 0, 0, 0);
+        try {
+          const client = await clientPromise;
+          const db = client.db('slitter-optimizers');
           
-          if (today > expiryDate) {
+          const user = await db.collection('users').findOne({
+            username: credentials.username
+          });
+
+          if (!user) {
             return null;
           }
-        }
 
-        return {
-          id: user._id.toString(),
-          name: user.username,
-          role: user.role || 'user',
-          expiryDate: user.expiryDate,
-          companyName: user.companyName
-        };
+          // Compare password
+          const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
+          
+          if (!isPasswordValid) {
+            return null;
+          }
+
+          // Check expiry only for non-admin users
+          if (user.role !== 'admin' && user.expiryDate) {
+            const expiryDate = new Date(user.expiryDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            expiryDate.setHours(0, 0, 0, 0);
+            
+            if (today > expiryDate) {
+              return null;
+            }
+          }
+
+          return {
+            id: user._id.toString(),
+            name: user.username,
+            role: user.role || 'user',
+            expiryDate: user.expiryDate,
+            companyName: user.companyName
+          };
+        } catch (error) {
+          console.error('Auth error:', error);
+          return null;
+        }
       }
     })
   ],
   pages: {
     signIn: '/login',
   },
+  secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
+        token.id = user.id;
         token.role = user.role;
         token.expiryDate = user.expiryDate;
         token.companyName = user.companyName;
@@ -62,16 +76,22 @@ export const authOptions = {
       return token;
     },
     async session({ session, token }) {
-      session.user.role = token.role as string;
-      session.user.expiryDate = token.expiryDate as string;
-      session.user.companyName = token.companyName as string;
+      if (token) {
+        session.user.id = token.id as string;
+        session.user.role = token.role as string;
+        session.user.expiryDate = token.expiryDate as string;
+        session.user.companyName = token.companyName as string;
+      }
       
+      // Check expiry for non-admin users
       if (token.role !== 'admin' && token.expiryDate) {
         const expiryDate = new Date(token.expiryDate as string);
         const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        expiryDate.setHours(0, 0, 0, 0);
         
         if (today > expiryDate) {
-          return { ...session, user: null };
+          return { ...session, user: { ...session.user, expired: true } };
         }
       }
       return session;
@@ -79,6 +99,9 @@ export const authOptions = {
   },
   session: {
     strategy: 'jwt',
+    maxAge: 2 * 60 * 60, // 2 hours
+  },
+  jwt: {
     maxAge: 2 * 60 * 60, // 2 hours
   },
 };

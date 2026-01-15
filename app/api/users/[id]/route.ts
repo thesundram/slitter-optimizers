@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import clientPromise from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import bcrypt from 'bcryptjs';
 
 export async function PUT(req, { params }) {
   const { id } = await params;
@@ -15,13 +16,13 @@ export async function PUT(req, { params }) {
   const client = await clientPromise;
   const db = client.db('slitter-optimizers');
 
-  const updateData = {
+  const updateData: any = {
     username: data.username,
     role: data.role || 'user',
   };
 
   if (data.password) {
-    updateData.password = data.password;
+    updateData.password = await bcrypt.hash(data.password, 10);
   }
 
   if (data.role !== 'admin' && data.expiryDate) {
