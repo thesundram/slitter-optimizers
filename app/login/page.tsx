@@ -38,7 +38,7 @@ export default function LoginPage() {
         toast.error('Invalid credentials or account expired');
       } else if (result?.ok) {
         toast.success('Login successful!');
-        window.location.href = '/';
+        window.location.href = '/dashboard';
       }
     } catch (error) {
       setLoading(false);
