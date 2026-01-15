@@ -23,11 +23,17 @@ export default withAuth(
       signIn: "/login",
     },
     callbacks: {
-      authorized: ({ token }) => !!token,
+      authorized: async ({ token, req }) => {
+        // Allow if token exists
+        if (token) return true;
+        
+        // Redirect to login if no token
+        return false;
+      },
     },
   }
 );
 
 export const config = {
-  matcher: ["/((?!login|api|_next|favicon.ico|icon.svg).*)"],
+  matcher: ["/((?!login|api|_next|favicon.ico|public|icon.svg|favicon.ico).*)"],
 };
