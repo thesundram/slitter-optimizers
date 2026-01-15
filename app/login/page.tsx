@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { signIn } from 'next-auth/react';
+import { useState, useEffect } from 'react';
+import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +19,13 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { data: session, status } = useSession();
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.push('/dashboard');
+    }
+  }, [status, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,10 +45,7 @@ export default function LoginPage() {
         toast.error('Invalid credentials or account expired');
       } else if (result?.ok) {
         toast.success('Login successful!');
-        // Force redirect after successful login
-        setTimeout(() => {
-          window.location.replace('/dashboard');
-        }, 100);
+        router.push('/dashboard');
       }
     } catch (error) {
       setLoading(false);
